@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pizza Guardian</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: 'Arial Black', Gadget, sans-serif; touch-action: none; user-select: none; }
+        #game-container { position: relative; width: 100vw; height: 100vh; background: radial-gradient(circle, #333, #000); }
+        canvas { display: block; cursor: pointer; }
+        #ui { position: absolute; top: 20px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; z-index: 50; }
+        .hud-item { background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 15px; border: 2px solid #ffcc00; color: #ffcc00; font-size: 1.2rem; }
+        #menu { 
+            position: absolute; inset: 0; background: rgba(0,0,0,0.9); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            color: white; z-index: 100; padding: 20px; text-align: center;
+        }
+        .pizza-health-container { width: 250px; height: 20px; background: #222; border-radius: 10px; border: 2px solid #fff; overflow: hidden; margin-top: 5px; }
+        #pizza-health { width: 100%; height: 100%; background: #ff4d4d; transition: width 0.3s; }
+        .smack-label { position: absolute; pointer-events: none; color: white; font-weight: 900; animation: smackOut 0.4s ease-out forwards; text-shadow: 2px 2px 0px #000; }
+        @keyframes smackOut { 0% { transform: scale(0.5) rotate(-20deg); opacity: 1; } 100% { transform: scale(2.5) rotate(20deg) translateY(-50px); opacity: 0; } }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui">
+        <div class="hud-item">SMACKED: <span id="score">0</span></div>
+        <div class="flex flex-col items-center">
+            <span class="text-white text-xs font-bold">PIZZA STATUS</span>
+            <div class="pizza-health-container"><div id="pizza-health"></div></div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="menu">
+        <h1 class="text-5xl font-black mb-2 text-yellow-400">PIZZA GUARDIAN 🍕</h1>
+        <p class="mb-6 text-lg text-slate-300">Smack the sumos away before they eat your lunch!</p>
+        <button onclick="startGame()" class="bg-yellow-500 hover:bg-yellow-400 text-black px-12 py-4 rounded-full text-3xl font-black shadow-[0_0_20px_rgba(255,204,0,0.5)] active:scale-95 transition">
+            PROTECT THE SLICE!
+        </button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const healthBar = document.getElementById('pizza-health');
+    const scoreText = document.getElementById('score');
+
+    // SETUP ASSETS
+    const carImg = new Image();
+    // Using a placeholder; change to 'sumo.jpg' when running locally with your file
+    carImg.src = 'sumo.png'; 
+    carImg.style.height="200px";
+    carImg.style.width="200px";
+    let gameActive = false;
+    let score = 0;
+    let health = 100;
+    let frame = 0;
+    let cars = [];
+    let pizzaPos = { x: 0, y: 0, size: 100 };
+
+    const SMACK_SOUNDS = ['BAM!', 'Boni', 'Nikal Boni', 'GET OUT!', 'STAY BACK!'];
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        pizzaPos.x = canvas.width / 2;
+        pizzaPos.y = canvas.height / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function spawnCar() {
+        // Difficulty increases as score goes up
+        const difficulty = Math.max(15, 60 - Math.floor(score/5));
+        if (frame % difficulty === 0) {
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.max(canvas.width, canvas.height) * 0.6;
+            const x = pizzaPos.x + Math.cos(angle) * distance;
+            const y = pizzaPos.y + Math.sin(angle) * distance;
+            
+            cars.push({
+                x, y,
+                speed: 2 + Math.random() * 2 + (score/20),
+                radius: 30 // Collision radius
+            });
+        }
+    }
+
+    function handleInput(e) {
+        if (!gameActive) return;
+        const pos = e.touches ? e.touches[0] : e;
+        const rect = canvas.getBoundingClientRect();
+        const inputX = pos.clientX - rect.left;
+        const inputY = pos.clientY - rect.top;
+
+        for (let i = cars.length - 1; i >= 0; i--) {
+            const c = cars[i];
+            const dist = Math.sqrt((inputX - c.x)**2 + (inputY - c.y)**2);
+            // Increased hit area (70px) to make it mobile friendly
+            if (dist < 70) {
+                createSmackEffect(c.x, c.y);
+                cars.splice(i, 1);
+                score++;
+                scoreText.innerText = score;
+                return; 
+            }
+        }
+    }
+
+    canvas.addEventListener('mousedown', handleInput);
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        handleInput(e);
+    }, {passive: false});
+
+    function createSmackEffect(x, y) {
+        const el = document.createElement('div');
+        el.className = 'smack-label';
+        el.style.left = (x - 50) + 'px';
+        el.style.top = (y - 20) + 'px';
+        el.innerText = SMACK_SOUNDS[Math.floor(Math.random() * SMACK_SOUNDS.length)];
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 400);
+    }
+
+    function drawCenter() {
+        const pulse = Math.sin(frame * 0.1) * 10;
+        
+        // Glow Effect
+        const grad = ctx.createRadialGradient(pizzaPos.x, pizzaPos.y, 10, pizzaPos.x, pizzaPos.y, 80 + pulse);
+        grad.addColorStop(0, 'rgba(255, 204, 0, 0.4)');
+        grad.addColorStop(1, 'rgba(255, 204, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(pizzaPos.x, pizzaPos.y, 100 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pizza Slice (Emoji)
+        ctx.font = '80px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🍕', pizzaPos.x, pizzaPos.y + 10);
+    }
+
+    function loop() {
+        if (!gameActive) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        spawnCar();
+
+        for (let i = cars.length - 1; i >= 0; i--) {
+            const c = cars[i];
+            const angle = Math.atan2(pizzaPos.y - c.y, pizzaPos.x - c.x);
+            c.x += Math.cos(angle) * c.speed;
+            c.y += Math.sin(angle) * c.speed;
+
+            // DRAW IMAGE CORRECTLY
+            ctx.save();
+            ctx.translate(c.x, c.y);
+            // Rotate the context so the image points at the pizza
+            ctx.rotate(angle + Math.PI / 2); 
+            
+            // drawImage(imageObject, dx, dy, dWidth, dHeight)
+            // We use -30 to center the 60px image on the coordinates
+            ctx.drawImage(carImg, -30, -30, 60, 60);
+            ctx.restore();
+
+            // Collision with pizza
+            const dist = Math.sqrt((c.x - pizzaPos.x)**2 + (c.y - pizzaPos.y)**2);
+            if (dist < 60) {
+                health -= 10;
+                healthBar.style.width = health + '%';
+                cars.splice(i, 1);
+                if (health <= 0) {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+
+        drawCenter();
+        frame++;
+        requestAnimationFrame(loop);
+    }
+
+    function startGame() {
+        gameActive = true;
+        score = 0;
+        health = 100;
+        cars = [];
+        frame = 0;
+        scoreText.innerText = '0';
+        healthBar.style.width = '100%';
+        document.getElementById('menu').style.display = 'none';
+        loop();
+    }
+
+    function gameOver() {
+        gameActive = false;
+        const menu = document.getElementById('menu');
+        menu.style.display = 'flex';
+        menu.innerHTML = `
+            <h1 class="text-7xl mb-4">😩</h1>
+            <h2 class="text-4xl font-black mb-2 text-red-500 uppercase">THEY ATE IT!</h2>
+            <h3 class="text-xl mb-6 text-slate-300">You smacked ${score} sumos.</h3>
+            <button onclick="location.reload()" class="bg-yellow-500 text-black px-10 py-4 rounded-full text-2xl font-black shadow-lg">TRY AGAIN</button>
+        `;
+    }
+</script>
+</body>
+</html>
