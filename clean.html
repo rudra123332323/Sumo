@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Clean Sweep: The Obstacle Course</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            touch-action: none;
+            overflow: hidden;
+            background-color: #020617;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+        #game-stage {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: #0f172a;
+            overflow: hidden;
+        }
+
+        /* Physics Objects */
+        .obstacle {
+            position: absolute;
+            background: #334155;
+            border: 2px solid #475569;
+            border-radius: 8px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.1);
+            font-weight: bold;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+        .furniture {
+            background: #1e293b;
+            border-color: #334155;
+            border-radius: 12px;
+        }
+
+        /* Player */
+        #player {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            font-size: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            pointer-events: none;
+            filter: drop-shadow(0 8px 12px rgba(0,0,0,0.6));
+            will-change: left, top;
+        }
+
+        /* Finger indicator */
+        #finger-pos {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 110;
+        }
+
+        /* Messes */
+        .mess {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            z-index: 40;
+            transform: translate(-50%, -50%);
+        }
+        .timer-svg {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            transform: rotate(-90deg);
+        }
+        .timer-circle {
+            fill: none;
+            stroke-width: 5;
+            stroke-linecap: round;
+        }
+
+        /* HUD */
+        .ui-header {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 200;
+            pointer-events: none;
+        }
+
+        #game-over {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(2, 6, 23, 0.98);
+            z-index: 300;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            text-align: center;
+            background-image: url('phone.png');
+            background-size: cover;
+          width: 100%;
+          height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-stage">
+    <div id="map-layout"></div>
+    <div id="finger-pos"></div>
+    
+    <div class="ui-header">
+        <div class="bg-slate-900/90 border border-slate-700 px-4 py-2 rounded-xl shadow-2xl backdrop-blur">
+            <div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Cleanliness</div>
+            <div id="score" class="text-2xl font-black text-emerald-400">0</div>
+        </div>
+        <div class="bg-slate-900/90 border border-slate-700 px-4 py-2 rounded-xl shadow-2xl backdrop-blur text-right">
+            <div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Lives</div>
+            <div id="lives" class="text-2xl font-bold tracking-tighter">❤️❤️❤️</div>
+        </div>
+    </div>
+
+    <div id="player"><img src="clean.png" width="80" height="80"></div>
+
+    <div id="game-over" >
+        <div class="text-6xl mb-4">🏠☣️</div>
+
+        <button onclick="location.reload()" class="bg-emerald-500 hover:bg-emerald-400 text-white px-12 py-4 rounded-full font-black text-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">TRY AGAIN</button>
+    </div>
+</div>
+
+<script>
+    const stage = document.getElementById('game-stage');
+    const mapLayout = document.getElementById('map-layout');
+    const player = document.getElementById('player');
+    const fingerPos = document.getElementById('finger-pos');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const gameOverScreen = document.getElementById('game-over');
+
+    let score = 0;
+    let lives = 3;
+    let gameActive = true;
+    let messes = [];
+    let spawnRate = 2500;
+    
+    // Player Physics State
+    let curX = window.innerWidth / 2;
+    let curY = window.innerHeight / 2;
+    let targetX = curX;
+    let targetY = curY;
+    const playerRadius = 25;
+
+    // Map Definitions (Rectangles)
+    const obstacles = [
+        // Walls
+        { x: 0.45, y: 0, w: 0.05, h: 0.35, label: '' }, // Kitchen Wall
+        { x: 0, y: 0.45, w: 0.45, h: 0.05, label: '' }, // Kitchen Wall
+        { x: 0.45, y: 0.6, w: 0.55, h: 0.05, label: '' }, // Bedroom Wall
+        
+        // Furniture
+        { x: 0.1, y: 0.1, w: 0.2, h: 0.15, label: 'Table', type: 'furniture' },
+        { x: 0.7, y: 0.1, w: 0.2, h: 0.3, label: 'Sofa', type: 'furniture' },
+        { x: 0.75, y: 0.75, w: 0.15, h: 0.15, label: 'Tub', type: 'furniture' }
+    ];
+
+    let obstacleRects = [];
+
+    function buildHouse() {
+        obstacles.forEach(ob => {
+            const el = document.createElement('div');
+            el.className = `obstacle ${ob.type || ''}`;
+            
+            const pxX = ob.x * window.innerWidth;
+            const pxY = ob.y * window.innerHeight;
+            const pxW = ob.w * window.innerWidth;
+            const pxH = ob.h * window.innerHeight;
+
+            el.style.left = pxX + 'px';
+            el.style.top = pxY + 'px';
+            el.style.width = pxW + 'px';
+            el.style.height = pxH + 'px';
+            el.innerText = ob.label;
+            mapLayout.appendChild(el);
+
+            obstacleRects.push({
+                left: pxX,
+                top: pxY,
+                right: pxX + pxW,
+                bottom: pxY + pxH
+            });
+        });
+    }
+
+    // Input Handling
+    const updateTarget = (e) => {
+        if (!gameActive) return;
+        targetX = e.clientX || (e.touches ? e.touches[0].clientX : targetX);
+        targetY = e.clientY || (e.touches ? e.touches[0].clientY : targetY);
+        
+        fingerPos.style.left = targetX + 'px';
+        fingerPos.style.top = targetY + 'px';
+    };
+
+    stage.addEventListener('mousemove', updateTarget);
+    stage.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        updateTarget(e);
+    }, { passive: false });
+
+    // Physics Loop (Collision Detection)
+    function gameLoop() {
+        if (!gameActive) return;
+
+        // Try to move towards target
+        let nextX = curX + (targetX - curX) * 0.4;
+        let nextY = curY + (targetY - curY) * 0.4;
+
+        // Collision Check Logic
+        // We check X and Y separately to allow sliding along walls
+        let canMoveX = true;
+        let canMoveY = true;
+
+        obstacleRects.forEach(rect => {
+            // Check X collision
+            if (nextX + playerRadius > rect.left && 
+                nextX - playerRadius < rect.right &&
+                curY + playerRadius > rect.top && 
+                curY - playerRadius < rect.bottom) {
+                canMoveX = false;
+            }
+            // Check Y collision
+            if (curX + playerRadius > rect.left && 
+                curX - playerRadius < rect.right &&
+                nextY + playerRadius > rect.top && 
+                nextY - playerRadius < rect.bottom) {
+                canMoveY = false;
+            }
+        });
+
+        if (canMoveX) curX = nextX;
+        if (canMoveY) curY = nextY;
+
+        // Apply Position
+        player.style.left = (curX - 30) + 'px';
+        player.style.top = (curY - 30) + 'px';
+
+        // Check Cleanup
+        checkCleanup(curX, curY);
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function spawnMess() {
+        if (!gameActive) return;
+
+        // Randomly find a valid spot not inside an obstacle
+        let x, y, valid = false;
+        let attempts = 0;
+        
+        while (!valid && attempts < 20) {
+            x = 50 + Math.random() * (window.innerWidth - 100);
+            y = 100 + Math.random() * (window.innerHeight - 200);
+            
+            valid = !obstacleRects.some(rect => 
+                x > rect.left - 20 && x < rect.right + 20 && 
+                y > rect.top - 20 && y < rect.bottom + 20
+            );
+            attempts++;
+        }
+
+        const types = ['☁️', '🫟','📜', '📦', '🕸️', '🍕'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        const duration = Math.max(1500, 4000 - (score / 25)); 
+
+        const messEl = document.createElement('div');
+        messEl.className = 'mess';
+        messEl.innerHTML = `
+            <svg class="timer-svg">
+                <circle class="timer-circle" cx="35" cy="35" r="30" stroke="#10b981"></circle>
+            </svg>
+            <span style="position:relative; z-index:2">${type}</span>
+        `;
+        
+        const circle = messEl.querySelector('.timer-circle');
+        const circumference = 2 * Math.PI * 30;
+        circle.style.strokeDasharray = circumference;
+        circle.style.strokeDashoffset = 0;
+
+        messEl.style.left = x + 'px';
+        messEl.style.top = y + 'px';
+        stage.appendChild(messEl);
+
+        const messObj = { x, y, el: messEl, duration };
+        
+        circle.style.transition = `stroke-dashoffset ${duration}ms linear, stroke 0.5s`;
+        setTimeout(() => {
+            circle.style.strokeDashoffset = circumference;
+            circle.style.stroke = "#ef4444";
+        }, 50);
+
+        messObj.failTimeout = setTimeout(() => {
+            if (gameActive) loseLife(messObj);
+        }, duration);
+
+        messes.push(messObj);
+        spawnRate = Math.max(600, spawnRate * 0.96);
+        setTimeout(spawnMess, spawnRate);
+    }
+
+    function checkCleanup(px, py) {
+        messes.forEach((m, index) => {
+            const dist = Math.sqrt((px - m.x)**2 + (py - m.y)**2);
+            if (dist < 50) {
+                clearTimeout(m.failTimeout);
+                m.el.style.transform = 'translate(-50%, -50%) scale(0)';
+                var d = document.createElement('img');
+d.src = "200.gif";
+
+// Position EXACTLY at player
+d.style.position = "absolute";
+d.style.left = (px - 25) + "px";  // center align
+d.style.top = (py - 25) + "px";
+
+d.style.height = "50px";
+d.style.width = "50px";
+d.style.pointerEvents = "none";
+d.style.zIndex = "150";
+
+// Optional: smooth fade-out
+d.style.transition = "opacity 0.4s ease";
+
+stage.appendChild(d);
+
+// Remove after animation
+setTimeout(() => {
+    d.style.opacity = "0";
+    setTimeout(() => d.remove(), 400);
+}, 300);
+                //d.style.fontSize="20px";
+              
+                m.el.style.opacity = '0';
+                setTimeout(() => m.el.remove(), 200);
+                messes.splice(index, 1);
+                score += 150;
+                scoreEl.innerText = score;
+            }
+        });
+    }
+
+    function loseLife(mess) {
+        const index = messes.indexOf(mess);
+        if (index > -1) messes.splice(index, 1);
+        mess.el.remove();
+        lives--;
+        livesEl.innerText = '❤️'.repeat(lives);
+        stage.animate([{ background: '#450a0a' }, { background: '#0f172a' }], 200);
+        if (lives <= 0) {
+            gameActive = false;
+            gameOverScreen.style.display = 'flex';
+        }
+    }
+
+    // Initialize
+    buildHouse();
+    gameLoop();
+    setTimeout(spawnMess, 1000);
+
+</script>
+</body>
+</html>
+
